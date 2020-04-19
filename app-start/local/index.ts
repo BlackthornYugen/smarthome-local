@@ -37,12 +37,84 @@ class LocalExecutionApp {
 
   identifyHandler(request: IntentFlow.IdentifyRequest):
       Promise<IntentFlow.IdentifyResponse> {
-    // TODO: Implement device identification
+        console.log("IDENTIFY intent: " + JSON.stringify(request, null, 2));
+
+      const scanData = request.inputs[0].payload.device.udpScanData;
+      if (!scanData) {
+        const err = new IntentFlow.HandlerError(request.requestId,
+            'invalid_request', 'Invalid scan data');
+        return Promise.reject(err);
+      }
+
+      // In this codelab, the scan data contains only local device id.
+      const localDeviceId = Buffer.from(scanData.data, 'hex');
+
+      const response: IntentFlow.IdentifyResponse = {
+        intent: Intents.IDENTIFY,
+        requestId: request.requestId,
+        payload: {
+          device: {
+            id: 'washer',
+            verificationId: localDeviceId.toString(),
+          }
+        }
+      };
+      console.log("IDENTIFY response: " + JSON.stringify(response, null, 2));
+
+      return Promise.resolve(response);
   }
 
   executeHandler(request: IntentFlow.ExecuteRequest):
       Promise<IntentFlow.ExecuteResponse> {
-    // TODO: Implement local execution
+    console.log("EXECUTE intent: " + JSON.stringify(request, null, 2));
+
+    const command = request.inputs[0].payload.commands[0];
+    const execution = command.execution[0];
+    const response = new Execute.Response.Builder()
+      .setRequestId(request.requestId);
+
+    const promises: Array<Promise<void>> = command.devices.map((device) => {
+      console.log("Handling EXECUTE intent for device: " + JSON.stringify(device));
+
+      // Convert execution params to a string for the local device
+      const params = execution.params as IWasherParams;
+      const payload = this.getDataForCommand(execution.command, params);
+
+      // Create a command to send over the local network
+      const radioCommand = new DataFlow.HttpRequestData();
+      radioCommand.requestId = request.requestId;
+      radioCommand.deviceId = device.id;
+      radioCommand.data = JSON.stringify(payload);
+      radioCommand.dataType = 'application/json';
+      radioCommand.port = SERVER_PORT;
+      radioCommand.method = Constants.HttpOperation.POST;
+      radioCommand.isSecure = false;
+
+      console.log("Sending request to the smart home device:", payload);
+
+      return this.app.getDeviceManager()
+        .send(radioCommand)
+        .then(() => {
+          const state = {online: true};
+          response.setSuccessState(device.id, Object.assign(state, params));
+          console.log(`Command successfully sent to ${device.id}`);
+        })
+        .catch((e: IntentFlow.HandlerError) => {
+          e.errorCode = e.errorCode || 'invalid_request';
+          response.setErrorState(device.id, e.errorCode);
+          console.error('An error occurred sending the command', e.errorCode);
+        });
+    });
+
+    return Promise.all(promises)
+      .then(() => {
+        return response.build();
+      })
+      .catch((e) => {
+        const err = new IntentFlow.HandlerError(request.requestId,
+            'invalid_request', e.message);
+        return Promise.reject(err);
+      });
   }
 
   /**
