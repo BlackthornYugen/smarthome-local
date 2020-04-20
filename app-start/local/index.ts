@@ -80,6 +80,31 @@ class LocalExecutionApp {
       const params = execution.params as IWasherParams;
       const payload = this.getDataForCommand(execution.command, params);
 
+      // Handle local LAN logic
+      if (execution.command === "action.devices.commands.OnOff") {
+        switch (device.id) {
+          case "washer":
+            fetch('https://steelcomputers.mozilla-iot.org/things/zb-500b91400001e9d1/properties/on', {
+              method: 'PUT',
+              headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer xyz'
+              },
+              body: JSON.stringify({on: !!params.on}),
+            }).then(res => {
+              console.log('called mozilla gateway successfully');
+              console.log(res);
+            }).catch(things => {
+              console.log('error calling mozilla gateway');
+              console.log(things);
+            });
+
+            break;
+        }
+      }
+
+
       // Create a command to send over the local network
       const radioCommand = new DataFlow.HttpRequestData();
       radioCommand.requestId = request.requestId;

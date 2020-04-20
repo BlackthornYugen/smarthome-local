@@ -98,37 +98,70 @@ const app = smarthome({
 });
 
 app.onSync((body) => {
+
+  // Device types used come from this page:
+  // https://developers.google.com/assistant/smarthome/guides
+
+
+  const washer = {
+    id: 'washer',
+    type: 'action.devices.types.WASHER',
+    traits: [
+      'action.devices.traits.OnOff',
+      'action.devices.traits.StartStop',
+      'action.devices.traits.RunCycle',
+    ],
+    name: {
+      defaultNames: ['My Washer'],
+      name: 'Washer',
+      nicknames: ['Washer'],
+    },
+    deviceInfo: {
+      manufacturer: 'Acme Co',
+      model: 'acme-washer',
+      hwVersion: '1.0',
+      swVersion: '1.0.1',
+    },
+    willReportState: true,
+    attributes: {
+      pausable: true,
+    },
+    otherDeviceIds: [{
+      deviceId: 'deviceid123',
+    }]
+  };
+
+  const bedroomLight = {
+    id: 'bedroomLight',
+    type: 'action.devices.types.LIGHT',
+    traits: [
+      'action.devices.traits.OnOff',
+      'action.devices.traits.Brightness',
+    ],
+    name: {
+      defaultNames: ['My Light'],
+      name: 'BedroomLight',
+      nicknames: ['Light', 'Anti Darkness Device'],
+    },
+    deviceInfo: {
+      manufacturer: 'Acme Co',
+      model: 'acme-bedroomlight',
+      hwVersion: '1.0',
+      swVersion: '1.0.1',
+    },
+    willReportState: true,
+    otherDeviceIds: [{
+      deviceId: 'bedroomLightId123',
+    }]
+  };
+
+
   return {
     requestId: body.requestId,
     payload: {
       agentUserId: '123',
-      devices: [{
-        id: 'washer',
-        type: 'action.devices.types.WASHER',
-        traits: [
-          'action.devices.traits.OnOff',
-          'action.devices.traits.StartStop',
-          'action.devices.traits.RunCycle',
-        ],
-        name: {
-          defaultNames: ['My Washer'],
-          name: 'Washer',
-          nicknames: ['Washer'],
-        },
-        deviceInfo: {
-          manufacturer: 'Acme Co',
-          model: 'acme-washer',
-          hwVersion: '1.0',
-          swVersion: '1.0.1',
-        },
-        willReportState: true,
-        attributes: {
-          pausable: true,
-        },
-        otherDeviceIds: [{
-          deviceId: 'deviceid123'
-        }],
-      }],
+      // TODO(dave): Add bedroomLight back here
+      devices: [washer],
     },
   };
 });
