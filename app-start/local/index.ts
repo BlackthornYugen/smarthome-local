@@ -79,17 +79,19 @@ class LocalExecutionApp {
       // Convert execution params to a string for the local device
       const params = execution.params as IWasherParams;
       const payload = this.getDataForCommand(execution.command, params);
+      const bearerToken = localStorage.getItem("bearerToken") || "";
+      const thing = "zb-500b91400001e9d1";
 
       // Handle local LAN logic
       if (execution.command === "action.devices.commands.OnOff") {
         switch (device.id) {
           case "washer":
-            fetch('https://steelcomputers.mozilla-iot.org/things/zb-500b91400001e9d1/properties/on', {
+            fetch('https://steelcomputers.mozilla-iot.org/things/'+ thing + '/properties/on', {
               method: 'PUT',
               headers: {
                 Accept: 'application/json',
                 'Content-Type': 'application/json',
-                Authorization: 'Bearer xyz'
+                Authorization: 'Bearer ' + bearerToken,
               },
               body: JSON.stringify({on: !!params.on}),
             }).then(res => {
@@ -103,7 +105,6 @@ class LocalExecutionApp {
             break;
         }
       }
-
 
       // Create a command to send over the local network
       const radioCommand = new DataFlow.HttpRequestData();
