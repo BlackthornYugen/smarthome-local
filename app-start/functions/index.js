@@ -33,75 +33,17 @@ const homegraph = google.homegraph({
   auth: auth,
 });
 
-exports.login = functions.https.onRequest((request, response) => {
-  if (request.method === 'GET') {
-    console.log('Requesting login page');
-    response.send(`
-    <html>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <body>
-        <form action="/login" method="post">
-          <input type="hidden" name="responseurl" value="${request.query.responseurl}" />
-          <button type="submit" style="font-size:14pt">Link this service to Google</button>
-        </form>
-      </body>
-    </html>
-  `);
-  } else if (request.method === 'POST') {
-    // Here, you should validate the user account.
-    // In this sample, we do not do that.
-    const responseurl = decodeURIComponent(request.body.responseurl);
-    console.log(`Redirect to ${responseurl}`);
-    return response.redirect(responseurl);
-  } else {
-    // Unsupported method
-    response.send(405, 'Method Not Allowed');
-  }
-});
-
-exports.fakeauth = functions.https.onRequest((request, response) => {
-  const responseurl = util.format('%s?code=%s&state=%s',
-      decodeURIComponent(request.query.redirect_uri), 'xxxxxx',
-      request.query.state);
-  console.log(`Set redirect as ${responseurl}`)
-  return response.redirect(`/login?responseurl=${encodeURIComponent(responseurl)}`);
-});
-
-exports.faketoken = functions.https.onRequest((request, response) => {
-  const grantType = request.query.grant_type ?
-    request.query.grant_type : request.body.grant_type;
-  const secondsInDay = 86400; // 60 * 60 * 24
-  const HTTP_STATUS_OK = 200;
-  console.log(`Grant type ${grantType}`);
-
-  let obj;
-  if (grantType === 'authorization_code') {
-    obj = {
-      token_type: 'bearer',
-      access_token: '123access',
-      refresh_token: '123refresh',
-      expires_in: secondsInDay,
-    };
-  } else if (grantType === 'refresh_token') {
-    obj = {
-      token_type: 'bearer',
-      access_token: '123access',
-      expires_in: secondsInDay,
-    };
-  }
-  response.status(HTTP_STATUS_OK)
-      .json(obj);
-});
-
 const app = smarthome({
   debug: true,
 });
 
-app.onSync((body) => {
+app.onSync((body, headers) => {
 
   // Device types used come from this page:
   // https://developers.google.com/assistant/smarthome/guides
 
+  // Bearer token is sent as authorization header.
+  const authHeader = headers.authorization;
 
   const washer = {
     id: 'washer',
@@ -125,6 +67,9 @@ app.onSync((body) => {
     willReportState: true,
     attributes: {
       pausable: true,
+    },
+    customData: {
+      authorization: authHeader,
     },
     otherDeviceIds: [{
       deviceId: 'deviceid123',
