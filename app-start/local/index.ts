@@ -79,8 +79,15 @@ class LocalExecutionApp {
       // Convert execution params to a string for the local device
       const params = execution.params as IWasherParams;
       const payload = this.getDataForCommand(execution.command, params);
-      const bearerToken = localStorage.getItem("bearerToken") || "";
       const thing = "zb-500b91400001e9d1";
+
+      // @ts-ignore
+      if (!device.customData.authorization) {
+        console.log("no token supplied in custom data");
+        return Promise.reject('no token');
+      }
+      // @ts-ignore
+      const bearerToken = device.customData.authorization;
 
       // Handle local LAN logic
       if (execution.command === "action.devices.commands.OnOff") {
@@ -91,7 +98,7 @@ class LocalExecutionApp {
               headers: {
                 Accept: 'application/json',
                 'Content-Type': 'application/json',
-                Authorization: 'Bearer ' + bearerToken,
+                Authorization: bearerToken,
               },
               body: JSON.stringify({on: !!params.on}),
             }).then(res => {
