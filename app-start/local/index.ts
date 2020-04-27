@@ -172,11 +172,43 @@ class LocalExecutionApp {
         return {};
     }
   }
+
+  /**
+   * Google home device responds to a query about what IoT Devices are available.
+   */
+  reachableDevicesHandler(request: IntentFlow.ReachableDevicesRequest):
+      IntentFlow.ReachableDevicesResponse {
+
+    console.log("Handling EXECUTE intent for device: %s ", JSON.stringify(request));
+
+    // Reference to the local proxy device
+    const proxyDeviceId = request.inputs[0].payload.device.id;
+
+    // Gather additional device ids reachable by local proxy device
+    // ...
+
+    const reachableDevices = [
+      // Each verificationId must match one of the otherDeviceIds
+      // in the SYNC response
+      { verificationId: "/things/zb-500b91400001e9d1" },
+      { verificationId: "local-device-id-2" },
+    ];
+
+    // Return a response
+    return {
+      intent: Intents.REACHABLE_DEVICES,
+      requestId: request.requestId,
+      payload: {
+        devices: reachableDevices,
+      },
+    };
+  };
 }
 
 const localHomeSdk = new App('1.0.0');
 const localApp = new LocalExecutionApp(localHomeSdk);
 localHomeSdk
+  .onReachableDevices(localApp.reachableDevicesHandler.bind(localApp))
   .onIdentify(localApp.identifyHandler.bind(localApp))
   .onExecute(localApp.executeHandler.bind(localApp))
   .listen()
