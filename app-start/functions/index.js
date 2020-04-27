@@ -33,6 +33,7 @@ const homegraph = google.homegraph({
   auth: auth,
 });
 
+const agentUserId = '123';
 const app = smarthome({
   debug: true,
 });
@@ -104,9 +105,9 @@ app.onSync((body, headers) => {
   return {
     requestId: body.requestId,
     payload: {
-      agentUserId: '123',
       // TODO(dave): Add bedroomLight back here
       devices: [washer],
+      agentUserId: agentUserId, // TODO: Get this from gateway?
     },
   };
 });
@@ -229,11 +230,11 @@ exports.smarthome = functions.https.onRequest(app);
 
 exports.requestsync = functions.https.onRequest(async (request, response) => {
   response.set('Access-Control-Allow-Origin', '*');
-  console.info('Request SYNC for user 123');
+  console.info('Request SYNC for user %s', agentUserId);
   try {
     const res = await homegraph.devices.requestSync({
       requestBody: {
-        agentUserId: '123',
+        agentUserId: agentUserId,
       },
     });
     console.info('Request sync response:', res.status, res.data);
@@ -255,7 +256,7 @@ exports.reportstate = functions.database.ref('{deviceId}').onWrite(
 
       const requestBody = {
         requestId: 'ff36a3cc', /* Any unique ID */
-        agentUserId: '123', /* Hardcoded user ID */
+        agentUserId: agentUserId, /* Hardcoded user ID */
         payload: {
           devices: {
             states: {
