@@ -21,9 +21,6 @@ const {smarthome} = require('actions-on-google');
 const {google} = require('googleapis');
 const util = require('util');
 const admin = require('firebase-admin');
-// Initialize Firebase
-admin.initializeApp();
-const firebaseRef = admin.database().ref('/');
 // Initialize Homegraph
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/homegraph'],
@@ -167,20 +164,16 @@ const updateDevice = async (execution, deviceId) => {
   switch (command) {
     case 'action.devices.commands.OnOff':
       state = {on: params.on};
-      ref = firebaseRef.child(deviceId).child('OnOff');
       break;
     case 'action.devices.commands.StartStop':
       state = {isRunning: params.start};
-      ref = firebaseRef.child(deviceId).child('StartStop');
       break;
     case 'action.devices.commands.PauseUnpause':
       state = {isPaused: params.pause};
-      ref = firebaseRef.child(deviceId).child('StartStop');
       break;
   }
 
-  return ref.update(state)
-      .then(() => state);
+  return state;
 };
 
 app.onExecute(async (body) => {
