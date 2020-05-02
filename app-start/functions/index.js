@@ -22,6 +22,7 @@ const {google} = require('googleapis');
 const util = require('util');
 const admin = require('firebase-admin');
 // Initialize Firebase
+const fetch = require('node-fetch');
 admin.initializeApp();
 const firebaseRef = admin.database().ref('/');
 // Initialize Homegraph
@@ -38,13 +39,67 @@ const app = smarthome({
   debug: true,
 });
 
-app.onSync((body, headers) => {
+app.onSync(async (body, headers) => {
 
   // Device types used come from this page:
   // https://developers.google.com/assistant/smarthome/guides
+  let customData = {
+    // Bearer token is sent as authorization header: "Bearer <JWT>"
+    authorization: headers.authorization,
+    // Split auth header into 3 parts: header, payload, and signature. Take payload. Payload contains base64 encoded
+    // json with an issuer. Issuer is the URL of the Mozilla IoT Gateway.
+    urlBase: JSON.parse(Buffer.from(headers.authorization.split('.')[1], "base64").toString()).iss,
+  };
 
-  // Bearer token is sent as authorization header.
-  const authHeader = headers.authorization;
+  const devicesResponse = await fetch(customData.urlBase + '/things', {
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': customData.authorization,
+    },
+  })
+
+  const devices = await devicesResponse.json();
+
+  const lights = devices.filter( device => {
+    const isSwitch = device["@type"].indexOf("OnOffSwitch") !== -1;
+    const isLight = device["@type"].indexOf("Light") !== -1;
+
+    return isLight || isSwitch;
+  });
+
+  const homeSdkDevices = [];
+
+  lights.map((device) => {
+    console.log("Light: %s", device);
+    let traits = ['action.devices.traits.OnOff'];
+
+    // If Mozilla device has "level", it is dimmable.
+    if (!!device.properties.level) {
+      // TODO: Check that level["@type"] === "BrightnessProperty" before push
+      traits.push('action.devices.traits.Brightness');
+    }
+
+    homeSdkDevices.push({
+      id: device.href,
+      type: "action.devices.types.LIGHT",
+      traits: traits,
+      name: {
+        defaultNames: [device.title],
+        name: device.title,
+        nicknames: [device.title]
+      },
+      customData: customData,
+      otherDeviceIds: [{
+        deviceId: device.href,
+      },{
+        // It's possible that this could cause problems.
+        // It was added when we were testing reachable devices through proxy
+        deviceId: agentUserId,
+      }],
+      willReportState: false,
+    })
+  });
 
   const washer = {
     id: 'washer',
@@ -69,45 +124,19 @@ app.onSync((body, headers) => {
     attributes: {
       pausable: true,
     },
-    customData: {
-      authorization: authHeader,
-    },
+    customData: customData,
     otherDeviceIds: [{
       deviceId: 'deviceid123',
     }]
   };
 
-  const bedroomLight = {
-    id: 'bedroomLight',
-    type: 'action.devices.types.LIGHT',
-    traits: [
-      'action.devices.traits.OnOff',
-      'action.devices.traits.Brightness',
-    ],
-    name: {
-      defaultNames: ['My Light'],
-      name: 'BedroomLight',
-      nicknames: ['Light', 'Anti Darkness Device'],
-    },
-    deviceInfo: {
-      manufacturer: 'Acme Co',
-      model: 'acme-bedroomlight',
-      hwVersion: '1.0',
-      swVersion: '1.0.1',
-    },
-    willReportState: true,
-    otherDeviceIds: [{
-      deviceId: 'bedroomLightId123',
-    }]
-  };
-
+  homeSdkDevices.push(washer);
 
   return {
     requestId: body.requestId,
     payload: {
-      // TODO(dave): Add bedroomLight back here
-      devices: [washer],
       agentUserId: agentUserId, // TODO: Get this from gateway?
+      devices: homeSdkDevices,
     },
   };
 });
