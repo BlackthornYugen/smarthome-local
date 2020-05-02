@@ -19,8 +19,8 @@
 const functions = require('firebase-functions');
 const {smarthome} = require('actions-on-google');
 const {google} = require('googleapis');
-const util = require('util');
-const admin = require('firebase-admin');
+const fetch = require('node-fetch');
+
 // Initialize Homegraph
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/homegraph'],
@@ -35,126 +35,92 @@ const app = smarthome({
   debug: true,
 });
 
-app.onSync((body, headers) => {
+app.onSync(async (body, headers) => {
 
   // Device types used come from this page:
   // https://developers.google.com/assistant/smarthome/guides
-
-  // Bearer token is sent as authorization header.
-  const authHeader = headers.authorization;
-
-  const washer = {
-    id: 'washer',
-    type: 'action.devices.types.WASHER',
-    traits: [
-      'action.devices.traits.OnOff',
-      'action.devices.traits.StartStop',
-      'action.devices.traits.RunCycle',
-    ],
-    name: {
-      defaultNames: ['My Washer'],
-      name: 'Washer',
-      nicknames: ['Washer'],
-    },
-    deviceInfo: {
-      manufacturer: 'Acme Co',
-      model: 'acme-washer',
-      hwVersion: '1.0',
-      swVersion: '1.0.1',
-    },
-    willReportState: true,
-    attributes: {
-      pausable: true,
-    },
-    customData: {
-      authorization: authHeader,
-    },
-    otherDeviceIds: [{
-      deviceId: 'deviceid123',
-    }]
+  let gatewayData = {
+    // Bearer token is sent as authorization header: "Bearer <JWT>"
+    authorization: headers.authorization,
+    // Split auth header into 3 parts: header, payload, and signature. Take payload. Payload contains base64 encoded
+    // json with an issuer. Issuer is the URL of the Mozilla IoT Gateway.
+    urlBase: JSON.parse(Buffer.from(headers.authorization.split('.')[1], "base64").toString()).iss,
   };
 
-  const bedroomLight = {
-    id: 'bedroomLight',
-    type: 'action.devices.types.LIGHT',
-    traits: [
-      'action.devices.traits.OnOff',
-      'action.devices.traits.Brightness',
-    ],
-    name: {
-      defaultNames: ['My Light'],
-      name: 'BedroomLight',
-      nicknames: ['Light', 'Anti Darkness Device'],
+  const devicesResponse = await fetch(gatewayData.urlBase + '/things', {
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': gatewayData.authorization,
     },
-    deviceInfo: {
-      manufacturer: 'Acme Co',
-      model: 'acme-bedroomlight',
-      hwVersion: '1.0',
-      swVersion: '1.0.1',
-    },
-    willReportState: true,
-    otherDeviceIds: [{
-      deviceId: 'bedroomLightId123',
-    }]
-  };
+  })
 
+  const devices = await devicesResponse.json();
+
+  const lights = devices.filter( device => {
+    const isSwitch = device["@type"].indexOf("OnOffSwitch") !== -1;
+    const isLight = device["@type"].indexOf("Light") !== -1;
+
+    return isLight || isSwitch;
+  });
+
+  const homeSdkDevices = [];
+
+  lights.map((device) => {
+    console.log("Light: %s", device);
+    let traits = ['action.devices.traits.OnOff'];
+
+    // If Mozilla device has "level", it is dimmable.
+    if (!!device.properties.level) {
+      // TODO: Check that level["@type"] === "BrightnessProperty" before push
+      traits.push('action.devices.traits.Brightness');
+    }
+
+    homeSdkDevices.push({
+      id: device.href,
+      type: "action.devices.types.LIGHT",
+      traits: traits,
+      name: {
+        defaultNames: [device.title],
+        name: device.title,
+        nicknames: [device.title]
+      },
+      customData: gatewayData,
+      otherDeviceIds: [{
+        deviceId: device.href,
+      },{
+        deviceId: agentUserId,
+      }],
+      willReportState: false,
+    })
+  });
 
   return {
     requestId: body.requestId,
     payload: {
-      // TODO(dave): Add bedroomLight back here
-      devices: [washer],
       agentUserId: agentUserId, // TODO: Get this from gateway?
+      devices: homeSdkDevices,
     },
   };
 });
 
-const queryFirebase = async (deviceId) => {
-  const snapshot = await firebaseRef.child(deviceId).once('value');
-  const snapshotVal = snapshot.val();
-  return {
-    on: snapshotVal.OnOff.on,
-    isPaused: snapshotVal.StartStop.isPaused,
-    isRunning: snapshotVal.StartStop.isRunning,
-  };
-};
-const queryDevice = async (deviceId) => {
-  const data = await queryFirebase(deviceId);
-  return {
-    on: data.on,
-    isPaused: data.isPaused,
-    isRunning: data.isRunning,
-    currentRunCycle: [{
-      currentCycle: 'rinse',
-      nextCycle: 'spin',
-      lang: 'en',
-    }],
-    currentTotalRemainingTime: 1212,
-    currentCycleRemainingTime: 301,
-  };
-};
-
 app.onQuery(async (body) => {
   const {requestId} = body;
-  const payload = {
-    devices: {},
-  };
   const queryPromises = [];
-  const intent = body.inputs[0];
-  for (const device of intent.payload.devices) {
-    const deviceId = device.id;
-    queryPromises.push(queryDevice(deviceId)
-        .then((data) => {
-        // Add response to device payload
-          payload.devices[deviceId] = data;
-        },
-        ));
-  }
+  // const intent = body.inputs[0];
+  // for (const device of intent.payload.devices) {
+  //   const deviceId = device.id;
+  //   queryPromises.push(queryDevice(deviceId)
+  //       .then((data) => {
+  //             // Add response to device payload
+  //             payload.devices[deviceId] = data;
+  //           },
+  //       ));
+  // }
   // Wait for all promises to resolve
   await Promise.all(queryPromises);
   return {
-    requestId: requestId,
-    payload: payload,
+    requestId: requestId
   };
 });
 
@@ -195,8 +161,9 @@ app.onExecute(async (body) => {
         executePromises.push(
             updateDevice(execution, device.id)
                 .then((data) => {
+                  console.log("Data: %s", data)
                   result.ids.push(device.id);
-                  Object.assign(result.states, data);
+                  // Object.assign(result.states, data);
                 })
                 .catch(() => console.error(`Unable to update ${device.id}`)),
         );
@@ -213,7 +180,7 @@ app.onExecute(async (body) => {
   };
 });
 
-app.onDisconnect((body, headers) => {
+app.onDisconnect( () => {
   console.log('User account unlinked from Google Assistant');
   // Return empty response
   return {};
@@ -274,15 +241,6 @@ exports.reportstate = functions.database.ref('{deviceId}').onWrite(
  * Update the current state of the washer device
  */
 exports.updatestate = functions.https.onRequest((request, response) => {
-  firebaseRef.child('washer').update({
-    OnOff: {
-      on: request.body.on,
-    },
-    StartStop: {
-      isPaused: request.body.isPaused,
-      isRunning: request.body.isRunning,
-    },
-  });
 
   return response.status(200).end();
 });
