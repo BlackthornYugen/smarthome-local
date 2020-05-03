@@ -25,10 +25,16 @@ import IntentFlow = smarthome.IntentFlow;
 
 const SERVER_PORT = 3388;
 
-interface IWasherParams {
+interface IGoogleParams {
   on?: boolean,
   start?: boolean,
   pause?: boolean,
+  brightness?: number,
+}
+
+interface IMozillaParams {
+  level?: number, // Map to brightness
+  on?: boolean, // map to on
 }
 
 class LocalExecutionApp {
@@ -37,7 +43,7 @@ class LocalExecutionApp {
 
   identifyHandler(request: IntentFlow.IdentifyRequest):
       Promise<IntentFlow.IdentifyResponse> {
-        console.log("IDENTIFY intent: " + JSON.stringify(request, null, 2));
+        console.debug("IDENTIFY intent: " + JSON.stringify(request, null, 2));
 
       const udpScanData = request.inputs[0].payload.device.udpScanData;
       const mdnsScanData = request.inputs[0].payload.device.mdnsScanData;
@@ -70,14 +76,14 @@ class LocalExecutionApp {
         payload: discoveredDevice
       };
 
-      console.log("IDENTIFY response: " + JSON.stringify(response, null, 2));
+      console.debug("IDENTIFY response: " + JSON.stringify(response, null, 2));
 
       return Promise.resolve(response);
   }
 
   executeHandler(request: IntentFlow.ExecuteRequest):
       Promise<IntentFlow.ExecuteResponse> {
-    console.log("EXECUTE intent: " + JSON.stringify(request, null, 2));
+    console.debug("EXECUTE intent: " + JSON.stringify(request, null, 2));
 
     const command = request.inputs[0].payload.commands[0];
     const execution = command.execution[0];
@@ -85,47 +91,59 @@ class LocalExecutionApp {
       .setRequestId(request.requestId);
 
     const promises: Array<Promise<void>> = command.devices.map((device) => {
-      console.log("Handling EXECUTE intent for device: " + JSON.stringify(device));
+      console.debug("Handling EXECUTE intent for device: " + JSON.stringify(device));
 
       // Convert execution params to a string for the local device
-      const params = execution.params as IWasherParams;
+      const params = execution.params as IGoogleParams;
       const payload = this.getDataForCommand(execution.command, params);
 
       // @ts-ignore
       if (!device.customData.authorization) {
-        console.log("no token supplied in custom data");
+        console.debug("no token supplied in custom data");
         return Promise.reject('no token');
       }
       // @ts-ignore
       const bearerToken = device.customData.authorization;
 
-      // Handle local LAN logic
-      if (execution.command === "action.devices.commands.OnOff") {
-        let deviceId = "";
-        switch (device.id) {
-          case "washer":
-            deviceId = `/things/zb-500b91400001e9d1`;
-            break;
-          default:
-            deviceId = device.id;
-        }
-
-        fetch('https://steelcomputers.mozilla-iot.org' +  deviceId + '/properties/on', {
-          method: 'PUT',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            Authorization: bearerToken,
-          },
-          body: JSON.stringify({on: !!params.on}),
-        }).then(res => {
-          console.log('called mozilla gateway successfully');
-          console.log(res);
-        }).catch(things => {
-          console.log('error calling mozilla gateway');
-          console.log(things);
-        });
+      let deviceId;
+      switch (device.id) {
+        case "washer":
+            deviceId = "/things/zb-500b91400001e9d1";
+          break;
+        default:
+          deviceId = device.id;
       }
+
+      let propertyName: string;
+      let propertyBody: IMozillaParams;
+      switch (execution.command) {
+        case "action.devices.commands.OnOff":
+          propertyName = "on";
+          propertyBody = {on: params.on};
+          break;
+        case "action.devices.commands.BrightnessAbsolute":
+          propertyName = "level";
+          propertyBody = {level: params.brightness};
+          break;
+        default:
+          return Promise.reject(`Unsupported execution command: ${execution.command}`);
+      }
+
+      fetch(`https://steelcomputers.mozilla-iot.org${deviceId}/properties/${propertyName}`, {
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': bearerToken,
+        },
+        body: JSON.stringify(propertyBody),
+      }).then(res => {
+        console.debug('called mozilla gateway successfully');
+        console.debug(res);
+      }).catch(things => {
+        console.debug('error calling mozilla gateway');
+        console.debug(things);
+      });
 
       // Create a command to send over the local network
       const radioCommand = new DataFlow.HttpRequestData();
@@ -137,20 +155,20 @@ class LocalExecutionApp {
       radioCommand.method = Constants.HttpOperation.POST;
       radioCommand.isSecure = false;
 
-      console.log("Sending request to the smart home device:", payload);
+      console.debug("Sending request to the smart home device:", payload);
 
       return this.app.getDeviceManager()
         .send(radioCommand)
         .then(() => {
           const state = {online: true};
           response.setSuccessState(device.id, Object.assign(state, params));
-          console.log(`Command successfully sent to ${device.id}`);
+          console.debug(`Command successfully sent to ${device.id}`);
         })
         .catch((e: IntentFlow.HandlerError) => {
           e.errorCode = e.errorCode || 'invalid_request';
           const state = {online: true};
           response.setSuccessState(device.id, state);
-          console.error('An error occurred sending the command', e.errorCode);
+          console.debug('An error occurred sending the command', e.errorCode);
         });
     });
 
@@ -168,7 +186,7 @@ class LocalExecutionApp {
   /**
    * Convert execution request into a local device command
    */
-  getDataForCommand(command: string, params: IWasherParams): unknown {
+  getDataForCommand(command: string, params: IGoogleParams): unknown {
     switch (command) {
       case 'action.devices.commands.OnOff':
         return {
@@ -183,7 +201,7 @@ class LocalExecutionApp {
           isPaused: params.pause ? true : false
         };
       default:
-        console.error('Unknown command', command);
+        console.debug('Unknown washer command', command);
         return {};
     }
   }
@@ -194,19 +212,14 @@ class LocalExecutionApp {
   reachableDevicesHandler(request: IntentFlow.ReachableDevicesRequest):
       IntentFlow.ReachableDevicesResponse {
 
-    console.log("Handling REACHABLE intent for device: %s ", JSON.stringify(request));
+    console.debug("Handling REACHABLE intent for device: %s ", JSON.stringify(request));
 
     // Reference to the local proxy device
     const proxyDeviceId = request.inputs[0].payload.device.id;
 
-    // Gather additional device ids reachable by local proxy device
-    // ...
-
-    const reachableDevices = [
-      // Each verificationId must match one of the otherDeviceIds
-      // in the SYNC response
-      { verificationId: "/things/zb-500b91400001e9d1" },
-    ];
+    const reachableDevices = request.devices
+        .filter(d => d.id.startsWith("/things/zb")) // all zigbee (zb) devices. this filters out phillips hue devices
+        .map(d => new Object({verificationId: d.id}));
 
     // Return a response
     return {
@@ -226,5 +239,5 @@ localHomeSdk
   .onIdentify(localApp.identifyHandler.bind(localApp))
   .onExecute(localApp.executeHandler.bind(localApp))
   .listen()
-  .then(() => console.log('Ready'))
+  .then(() => console.log(new Date()))
   .catch((e: Error) => console.error(e));
