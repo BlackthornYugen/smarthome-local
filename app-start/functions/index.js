@@ -92,10 +92,6 @@ app.onSync(async (body, headers) => {
       customData: customData,
       otherDeviceIds: [{
         deviceId: device.href,
-      },{
-        // It's possible that this could cause problems.
-        // It was added when we were testing reachable devices through proxy
-        deviceId: agentUserId,
       }],
       willReportState: false,
     })
@@ -144,10 +140,12 @@ app.onSync(async (body, headers) => {
 const queryFirebase = async (deviceId) => {
   const snapshot = await firebaseRef.child(deviceId).once('value');
   const snapshotVal = snapshot.val();
+  console.log("SNAPSHOT VAL %s for device %s", JSON.stringify(snapshotVal), deviceId)
   return {
-    on: snapshotVal.OnOff.on,
-    isPaused: snapshotVal.StartStop.isPaused,
-    isRunning: snapshotVal.StartStop.isRunning,
+    // Handle objects with different params
+    on: (snapshotVal && snapshotVal.OnOff && snapshotVal.OnOff.on) ? snapshot.OnOff.on : false,
+    isPaused: (snapshotVal && snapshotVal.StartStop && snapshotVal.StartStop.isPaused) ? snapshotVal.StartStop.isPaused : false,
+    isRunning: (snapshotVal && snapshotVal.StartStop && snapshotVal.StartStop.isRunning) ? snapshotVal.StartStop.isRunning : false,
   };
 };
 const queryDevice = async (deviceId) => {
