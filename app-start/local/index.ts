@@ -23,7 +23,7 @@ import Execute = smarthome.Execute;
 import Intents = smarthome.Intents;
 import IntentFlow = smarthome.IntentFlow;
 
-const SERVER_PORT = 3388;
+const SERVER_PORT = 8080;
 
 interface IGoogleParams {
   on?: boolean,
@@ -48,12 +48,6 @@ class LocalExecutionApp {
       const udpScanData = request.inputs[0].payload.device.udpScanData;
       const mdnsScanData = request.inputs[0].payload.device.mdnsScanData;
 
-      if (udpScanData == undefined && mdnsScanData == undefined) {
-        const err = new IntentFlow.HandlerError(request.requestId,
-            'invalid_request', 'Invalid scan data');
-        return Promise.reject(err);
-      }
-
       // In this codelab, the scan data contains only local device id.
       let discoveredDevice: IntentFlow.IdentifyResponsePayload;
 
@@ -62,12 +56,23 @@ class LocalExecutionApp {
           id: 'washer',
           verificationId: Buffer.from(udpScanData.data, 'hex').toString(),
         }};
-      } else {
+      } else if (mdnsScanData) {
+        if (mdnsScanData.type !== "http") {
+          return Promise.reject(new IntentFlow.HandlerError(request.requestId,
+              'invalid_request', `Non-supported type: ${mdnsScanData.type}`));
+        }
+
+        // FIXME: ASSUMPTION, all mdns http servers are a Moz Gateway
+        // TODO: Actually talk to proxy device to confirm it is a Moz Gateway.
+        console.log(`Found ${mdnsScanData.type}:${mdnsScanData.name}`)
         discoveredDevice = { device: {
           id: 'hub',
           isProxy: true,
           isLocalOnly: true,
         }};
+      } else {
+        return Promise.reject(new IntentFlow.HandlerError(request.requestId,
+            'invalid_request', 'Invalid scan data'));
       }
 
       const response: IntentFlow.IdentifyResponse = {
@@ -129,30 +134,17 @@ class LocalExecutionApp {
           return Promise.reject(`Unsupported execution command: ${execution.command}`);
       }
 
-      fetch(`https://steelcomputers.mozilla-iot.org${deviceId}/properties/${propertyName}`, {
-        method: 'PUT',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Authorization': bearerToken,
-        },
-        body: JSON.stringify(propertyBody),
-      }).then(res => {
-        console.debug('called mozilla gateway successfully');
-        console.debug(res);
-      }).catch(things => {
-        console.debug('error calling mozilla gateway');
-        console.debug(things);
-      });
-
       // Create a command to send over the local network
+      // Recipient determined by IDENTIFY or REACHABLE DEVICE responses.
       const radioCommand = new DataFlow.HttpRequestData();
+      radioCommand.path = `${deviceId}/properties/${propertyName}`;
       radioCommand.requestId = request.requestId;
       radioCommand.deviceId = device.id;
-      radioCommand.data = JSON.stringify(payload);
+      radioCommand.data = JSON.stringify(propertyBody);
       radioCommand.dataType = 'application/json';
+      radioCommand.headers = 'Authorization: ' + bearerToken;
       radioCommand.port = SERVER_PORT;
-      radioCommand.method = Constants.HttpOperation.POST;
+      radioCommand.method = Constants.HttpOperation.PUT;
       radioCommand.isSecure = false;
 
       console.debug("Sending request to the smart home device:", payload);
@@ -216,6 +208,8 @@ class LocalExecutionApp {
 
     // Reference to the local proxy device
     const proxyDeviceId = request.inputs[0].payload.device.id;
+    // FIXME: (ASSUMPTION) all devices in request are reachable by this proxy device.
+    // TODO:  Actually talk to Moz Gateway (proxy device) to make sure these are available.
 
     const reachableDevices = request.devices
         .filter(d => d.id.startsWith("/things/zb")) // all zigbee (zb) devices. this filters out phillips hue devices
