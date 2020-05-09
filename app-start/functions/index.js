@@ -97,37 +97,6 @@ app.onSync(async (body, headers) => {
     })
   });
 
-  const washer = {
-    id: 'washer',
-    type: 'action.devices.types.WASHER',
-    traits: [
-      'action.devices.traits.OnOff',
-      'action.devices.traits.StartStop',
-      'action.devices.traits.RunCycle',
-    ],
-    name: {
-      defaultNames: ['My Washer'],
-      name: 'Washer',
-      nicknames: ['Washer'],
-    },
-    deviceInfo: {
-      manufacturer: 'Acme Co',
-      model: 'acme-washer',
-      hwVersion: '1.0',
-      swVersion: '1.0.1',
-    },
-    willReportState: true,
-    attributes: {
-      pausable: true,
-    },
-    customData: customData,
-    otherDeviceIds: [{
-      deviceId: 'deviceid123',
-    }]
-  };
-
-  homeSdkDevices.push(washer);
-
   return {
     requestId: body.requestId,
     payload: {
@@ -148,6 +117,7 @@ const queryFirebase = async (deviceId) => {
     isRunning: (snapshotVal && snapshotVal.StartStop && snapshotVal.StartStop.isRunning) ? snapshotVal.StartStop.isRunning : false,
   };
 };
+
 const queryDevice = async (deviceId) => {
   const data = await queryFirebase(deviceId);
   return {
