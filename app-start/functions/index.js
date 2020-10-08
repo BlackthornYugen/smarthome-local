@@ -15,7 +15,8 @@
  */
 
 'use strict';
-
+// TODO: This URL should come from the OAuth process, but hacking to get this to work.
+const OVERRIDE_URL = "https://smarthome.jskw.dev";
 const functions = require('firebase-functions');
 const {smarthome} = require('actions-on-google');
 const {google} = require('googleapis');
@@ -39,6 +40,12 @@ const app = smarthome({
   debug: true,
 });
 
+const GOOGLE_TYPE_LIGHT = "action.devices.types.LIGHT";
+const GOOGLE_TYPE_LOCK = 'action.devices.types.LOCK';
+const GOOGLE_TRAIT_LOCKABLE = 'action.devices.traits.LockUnlock';
+const GOOGLE_TRAIT_DIMMABLE = 'action.devices.traits.Brightness';
+
+const GOOGLE_TRAIT_SWITCHABLE = 'action.devices.traits.OnOff';
 app.onSync(async (body, headers) => {
 
   // Device types used come from this page:
@@ -48,7 +55,9 @@ app.onSync(async (body, headers) => {
     authorization: headers.authorization,
     // Split auth header into 3 parts: header, payload, and signature. Take payload. Payload contains base64 encoded
     // json with an issuer. Issuer is the URL of the Mozilla IoT Gateway.
-    urlBase: JSON.parse(Buffer.from(headers.authorization.split('.')[1], "base64").toString()).iss,
+    // TODO: uncomment this after we fix oauth linking?
+    //urlBase: JSON.parse(Buffer.from(headers.authorization.split('.')[1], "base64").toString()).iss,
+    urlBase: OVERRIDE_URL
   };
 
   const devicesResponse = await fetch(customData.urlBase + '/things', {
@@ -61,28 +70,33 @@ app.onSync(async (body, headers) => {
 
   const devices = await devicesResponse.json();
 
-  const lights = devices.filter( device => {
-    const isSwitch = device["@type"].indexOf("OnOffSwitch") !== -1;
-    const isLight = device["@type"].indexOf("Light") !== -1;
+  const homeSdkDevices = devices.map((device) => {
+    const deviceTypes = device["@type"];
+    const isSwitch = deviceTypes.indexOf("OnOffSwitch") !== -1;
+    const isLight = deviceTypes.indexOf("Light") !== -1;
+    const isLock = deviceTypes.indexOf("Lock") !== -1;
 
-    return isLight || isSwitch;
-  });
+    let traits = [];
+    let deviceType = null;
 
-  const homeSdkDevices = [];
+    if (isLight || isSwitch) {
+      traits.push(GOOGLE_TRAIT_SWITCHABLE)
+      deviceType = GOOGLE_TYPE_LIGHT;
 
-  lights.map((device) => {
-    console.log("Light: %s", device);
-    let traits = ['action.devices.traits.OnOff'];
-
-    // If Mozilla device has "level", it is dimmable.
-    if (!!device.properties.level) {
-      // TODO: Check that level["@type"] === "BrightnessProperty" before push
-      traits.push('action.devices.traits.Brightness');
+      // If Mozilla device has "level", it is dimmable.
+      if (!!device.properties.level) {
+        traits.push(GOOGLE_TRAIT_DIMMABLE);
+      }
+    } else if (isLock) {
+      traits.push(GOOGLE_TRAIT_LOCKABLE)
+      deviceType = GOOGLE_TYPE_LOCK;
+    } else {
+      return null;
     }
 
-    homeSdkDevices.push({
+    return {
       id: device.href,
-      type: "action.devices.types.LIGHT",
+      type: deviceType,
       traits: traits,
       name: {
         defaultNames: [device.title],
@@ -94,8 +108,8 @@ app.onSync(async (body, headers) => {
         deviceId: device.href,
       }],
       willReportState: false,
-    })
-  });
+    }
+  }).filter(device => device != null);
 
   return {
     requestId: body.requestId,
@@ -109,7 +123,6 @@ app.onSync(async (body, headers) => {
 const queryFirebase = async (deviceId) => {
   const snapshot = await firebaseRef.child(deviceId).once('value');
   const snapshotVal = snapshot.val();
-  console.log("SNAPSHOT VAL %s for device %s", JSON.stringify(snapshotVal), deviceId)
   return {
     // Handle objects with different params
     on: (snapshotVal && snapshotVal.OnOff && snapshotVal.OnOff.on) ? snapshot.OnOff.on : false,
@@ -118,20 +131,38 @@ const queryFirebase = async (deviceId) => {
   };
 };
 
-const queryDevice = async (deviceId) => {
-  const data = await queryFirebase(deviceId);
-  return {
-    on: data.on,
-    isPaused: data.isPaused,
-    isRunning: data.isRunning,
-    currentRunCycle: [{
-      currentCycle: 'rinse',
-      nextCycle: 'spin',
-      lang: 'en',
-    }],
-    currentTotalRemainingTime: 1212,
-    currentCycleRemainingTime: 301,
-  };
+const queryDevice = async (device) => {
+  const data = await queryMozillaDevice(device);
+  const mozResponse = await data.json();
+  const response = {};
+
+  if (mozResponse.level !== undefined) {
+    // console.log(JSON.stringify(mozResponse))
+    response.brightness = Math.round(mozResponse.level);
+  }
+
+  if (mozResponse.locked !== undefined) {
+    response.isLocked = mozResponse.locked === "locked";
+    response.isJammed = mozResponse.locked === "jammed";
+  }
+
+  if (mozResponse.on !== undefined) {
+    response.on = mozResponse.on;
+  }
+
+  return response;
+};
+
+const queryMozillaDevice = async (device) => {
+  const customData = device.customData;
+  customData.urlBase = OVERRIDE_URL; // TODO: Remove this
+  return await fetch(customData.urlBase + device.id + "/properties" , {
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': customData.authorization,
+    },
+  })
 };
 
 app.onQuery(async (body) => {
@@ -142,11 +173,10 @@ app.onQuery(async (body) => {
   const queryPromises = [];
   const intent = body.inputs[0];
   for (const device of intent.payload.devices) {
-    const deviceId = device.id;
-    queryPromises.push(queryDevice(deviceId)
+    queryPromises.push(queryDevice(device)
         .then((data) => {
         // Add response to device payload
-          payload.devices[deviceId] = data;
+          payload.devices[device.id] = data;
         },
         ));
   }
@@ -218,7 +248,7 @@ app.onExecute(async (body) => {
 });
 
 app.onDisconnect((body, headers) => {
-  console.log('User account unlinked from Google Assistant');
+  console.debug('User account unlinked from Google Assistant');
   // Return empty response
   return {};
 });

@@ -30,6 +30,7 @@ interface IGoogleParams {
   start?: boolean,
   pause?: boolean,
   brightness?: number,
+  lock?: boolean,
 }
 
 interface IMozillaParams {
@@ -52,12 +53,10 @@ class LocalExecutionApp {
       let discoveredDevice: IntentFlow.IdentifyResponsePayload;
 
       if (udpScanData) {
-        discoveredDevice = { device:  {
-          id: 'washer',
-          verificationId: Buffer.from(udpScanData.data, 'hex').toString(),
-        }};
+        return Promise.reject(new IntentFlow.HandlerError(request.requestId,
+            'invalid_request', 'Invalid scan data'));
       } else if (mdnsScanData) {
-        if (mdnsScanData.type !== "http") {
+        if (mdnsScanData.type !== "moz") {
           return Promise.reject(new IntentFlow.HandlerError(request.requestId,
               'invalid_request', `Non-supported type: ${mdnsScanData.type}`));
         }
@@ -100,7 +99,6 @@ class LocalExecutionApp {
 
       // Convert execution params to a string for the local device
       const params = execution.params as IGoogleParams;
-      const payload = this.getDataForCommand(execution.command, params);
 
       // @ts-ignore
       if (!device.customData.authorization) {
@@ -119,35 +117,52 @@ class LocalExecutionApp {
           deviceId = device.id;
       }
 
-      let propertyName: string;
-      let propertyBody: IMozillaParams;
+      let propertyOrAction: string | null = null;
+      let propertyBody: IMozillaParams | null = null;
+      let actionBody: object | null = null;
+
+      // Create a command to send over the local network
+      // Recipient determined by IDENTIFY or REACHABLE DEVICE responses.
+      const radioCommand = new DataFlow.HttpRequestData();
+
       switch (execution.command) {
         case "action.devices.commands.OnOff":
-          propertyName = "on";
+          propertyOrAction = "on";
           propertyBody = {on: params.on};
           break;
         case "action.devices.commands.BrightnessAbsolute":
-          propertyName = "level";
+          propertyOrAction = "level";
           propertyBody = {level: params.brightness};
+          break;
+        case "action.devices.commands.LockUnlock":
+          if (params.lock) {
+            propertyOrAction = "lock";
+            actionBody = {lock: {input:{}}};
+          } else {
+            propertyOrAction = "unlock";
+            actionBody = {unlock: {input:{}}};
+          }
           break;
         default:
           return Promise.reject(`Unsupported execution command: ${execution.command}`);
       }
 
-      // Create a command to send over the local network
-      // Recipient determined by IDENTIFY or REACHABLE DEVICE responses.
-      const radioCommand = new DataFlow.HttpRequestData();
-      radioCommand.path = `${deviceId}/properties/${propertyName}`;
+      if (propertyBody) {
+        radioCommand.method = Constants.HttpOperation.PUT;
+        radioCommand.path = `${deviceId}/properties/${propertyOrAction}`;
+        radioCommand.data = JSON.stringify(propertyBody);
+      } else if (actionBody) {
+        radioCommand.method = Constants.HttpOperation.POST;
+        radioCommand.path = `${deviceId}/actions/${propertyOrAction}`;
+        radioCommand.data = JSON.stringify(actionBody);
+      }
+
       radioCommand.requestId = request.requestId;
       radioCommand.deviceId = device.id;
-      radioCommand.data = JSON.stringify(propertyBody);
       radioCommand.dataType = 'application/json';
       radioCommand.headers = 'Authorization: ' + bearerToken;
       radioCommand.port = SERVER_PORT;
-      radioCommand.method = Constants.HttpOperation.PUT;
       radioCommand.isSecure = false;
-
-      console.debug("Sending request to the smart home device:", payload);
 
       return this.app.getDeviceManager()
         .send(radioCommand)
@@ -212,7 +227,7 @@ class LocalExecutionApp {
     // TODO:  Actually talk to Moz Gateway (proxy device) to make sure these are available.
 
     const reachableDevices = request.devices
-        .filter(d => d.id.startsWith("/things/zb")) // all zigbee (zb) devices. this filters out phillips hue devices
+        .filter(d => d.id.startsWith("/things/")) // all zigbee (zb) devices. this filters out phillips hue devices
         .map(d => new Object({verificationId: d.id}));
 
     // Return a response
