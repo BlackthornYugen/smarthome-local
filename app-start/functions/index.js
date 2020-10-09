@@ -24,7 +24,6 @@ const admin = require('firebase-admin');
 // Initialize Firebase
 const fetch = require('node-fetch');
 admin.initializeApp();
-const firebaseRef = admin.database().ref('/');
 // Initialize Homegraph
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/homegraph'],
@@ -176,62 +175,11 @@ app.onQuery(async (body) => {
   };
 });
 
-const updateDevice = async (execution, deviceId) => {
-  const {params, command} = execution;
-  let state; let ref;
-  switch (command) {
-    case 'action.devices.commands.OnOff':
-      state = {on: params.on};
-      ref = firebaseRef.child(deviceId).child('OnOff');
-      break;
-    case 'action.devices.commands.StartStop':
-      state = {isRunning: params.start};
-      ref = firebaseRef.child(deviceId).child('StartStop');
-      break;
-    case 'action.devices.commands.PauseUnpause':
-      state = {isPaused: params.pause};
-      ref = firebaseRef.child(deviceId).child('StartStop');
-      break;
-  }
-
-  return ref.update(state)
-      .then(() => state);
-};
-
 app.onExecute(async (body) => {
-  const {requestId} = body;
-  // Execution results are grouped by status
-  const result = {
-    ids: [],
-    status: 'SUCCESS',
-    states: {
-      online: true,
-    },
-  };
+  console.log("UNEXPECTED CALL TO CLOUD EXECUTE FN");
 
-  const executePromises = [];
-  const intent = body.inputs[0];
-  for (const command of intent.payload.commands) {
-    for (const device of command.devices) {
-      for (const execution of command.execution) {
-        executePromises.push(
-            updateDevice(execution, device.id)
-                .then((data) => {
-                  result.ids.push(device.id);
-                  Object.assign(result.states, data);
-                })
-                .catch(() => console.error(`Unable to update ${device.id}`)),
-        );
-      }
-    }
-  }
-
-  await Promise.all(executePromises);
   return {
-    requestId: requestId,
-    payload: {
-      commands: [result],
-    },
+    status: 'FAILURE'
   };
 });
 
