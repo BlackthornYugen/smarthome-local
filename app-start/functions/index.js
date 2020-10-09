@@ -20,7 +20,6 @@ const OVERRIDE_URL = "https://smarthome.jskw.dev";
 const functions = require('firebase-functions');
 const {smarthome} = require('actions-on-google');
 const {google} = require('googleapis');
-const util = require('util');
 const admin = require('firebase-admin');
 // Initialize Firebase
 const fetch = require('node-fetch');
@@ -120,16 +119,6 @@ app.onSync(async (body, headers) => {
   };
 });
 
-const queryFirebase = async (deviceId) => {
-  const snapshot = await firebaseRef.child(deviceId).once('value');
-  const snapshotVal = snapshot.val();
-  return {
-    // Handle objects with different params
-    on: (snapshotVal && snapshotVal.OnOff && snapshotVal.OnOff.on) ? snapshot.OnOff.on : false,
-    isPaused: (snapshotVal && snapshotVal.StartStop && snapshotVal.StartStop.isPaused) ? snapshotVal.StartStop.isPaused : false,
-    isRunning: (snapshotVal && snapshotVal.StartStop && snapshotVal.StartStop.isRunning) ? snapshotVal.StartStop.isRunning : false,
-  };
-};
 
 const queryDevice = async (device) => {
   const data = await queryMozillaDevice(device);
@@ -137,7 +126,6 @@ const queryDevice = async (device) => {
   const response = {};
 
   if (mozResponse.level !== undefined) {
-    // console.log(JSON.stringify(mozResponse))
     response.brightness = Math.round(mozResponse.level);
   }
 
@@ -270,53 +258,4 @@ exports.requestsync = functions.https.onRequest(async (request, response) => {
     console.error(err);
     response.status(500).send(`Error requesting sync: ${err}`);
   }
-});
-
-/**
- * Send a REPORT STATE call to the homegraph when data for any device id
- * has been changed.
- */
-exports.reportstate = functions.database.ref('{deviceId}').onWrite(
-    async (change, context) => {
-      console.info('Firebase write event triggered this cloud function');
-      const snapshot = change.after.val();
-
-      const requestBody = {
-        requestId: 'ff36a3cc', /* Any unique ID */
-        agentUserId: agentUserId, /* Hardcoded user ID */
-        payload: {
-          devices: {
-            states: {
-              /* Report the current state of our washer */
-              [context.params.deviceId]: {
-                on: snapshot.OnOff.on,
-                isPaused: snapshot.StartStop.isPaused,
-                isRunning: snapshot.StartStop.isRunning,
-              },
-            },
-          },
-        },
-      };
-
-      const res = await homegraph.devices.reportStateAndNotification({
-        requestBody,
-      });
-      console.info('Report state response:', res.status, res.data);
-    });
-
-/**
- * Update the current state of the washer device
- */
-exports.updatestate = functions.https.onRequest((request, response) => {
-  firebaseRef.child('washer').update({
-    OnOff: {
-      on: request.body.on,
-    },
-    StartStop: {
-      isPaused: request.body.isPaused,
-      isRunning: request.body.isRunning,
-    },
-  });
-
-  return response.status(200).end();
 });
