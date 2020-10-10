@@ -17,13 +17,19 @@
 'use strict';
 // TODO: This URL should come from the OAuth process, but hacking to get this to work.
 const OVERRIDE_URL = "https://smarthome.jskw.dev";
-const functions = require('firebase-functions');
 const {smarthome} = require('actions-on-google');
 const {google} = require('googleapis');
-const admin = require('firebase-admin');
-// Initialize Firebase
+const cors = require('cors');
+const morgan = require('morgan');
+const express = require('express');
 const fetch = require('node-fetch');
-admin.initializeApp();
+
+
+const EXPRESS_PORT = 3000;
+const expressApp = express();
+expressApp.use(cors())
+expressApp.use(morgan('dev'))
+
 // Initialize Homegraph
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/homegraph'],
@@ -33,8 +39,9 @@ const homegraph = google.homegraph({
   auth: auth,
 });
 
+
 const agentUserId = '123';
-const app = smarthome({
+const smarthomeApp = smarthome({
   debug: true,
 });
 
@@ -44,7 +51,7 @@ const GOOGLE_TRAIT_LOCKABLE = 'action.devices.traits.LockUnlock';
 const GOOGLE_TRAIT_DIMMABLE = 'action.devices.traits.Brightness';
 
 const GOOGLE_TRAIT_SWITCHABLE = 'action.devices.traits.OnOff';
-app.onSync(async (body, headers) => {
+smarthomeApp.onSync(async (body, headers) => {
 
   // Device types used come from this page:
   // https://developers.google.com/assistant/smarthome/guides
@@ -152,7 +159,7 @@ const queryMozillaDevice = async (device) => {
   })
 };
 
-app.onQuery(async (body) => {
+smarthomeApp.onQuery(async (body) => {
   const {requestId} = body;
   const payload = {
     devices: {},
@@ -175,35 +182,26 @@ app.onQuery(async (body) => {
   };
 });
 
-app.onExecute(async (body) => {
+// TODO(dave): Remove this if nothing breaks.
+// A guide on Google's site indicated that if local fulfilment apps are used, the cloud
+// server shouldn't need to support the EXECUTE intent.
+// If this breaks something, can rewrite this to call mozilla gateway.
+smarthomeApp.onExecute(async (body) => {
   console.log("UNEXPECTED CALL TO CLOUD EXECUTE FN");
 
   return {
-    status: 'FAILURE'
+    status: 'SUCCESS'
   };
 });
 
-app.onDisconnect((body, headers) => {
+smarthomeApp.onDisconnect((body, headers) => {
   console.debug('User account unlinked from Google Assistant');
   // Return empty response
   return {};
 });
 
-exports.smarthome = functions.https.onRequest(app);
+expressApp.post('/smarthome', smarthomeApp);
 
-exports.requestsync = functions.https.onRequest(async (request, response) => {
-  response.set('Access-Control-Allow-Origin', '*');
-  console.info('Request SYNC for user %s', agentUserId);
-  try {
-    const res = await homegraph.devices.requestSync({
-      requestBody: {
-        agentUserId: agentUserId,
-      },
-    });
-    console.info('Request sync response:', res.status, res.data);
-    response.json(res.data);
-  } catch (err) {
-    console.error(err);
-    response.status(500).send(`Error requesting sync: ${err}`);
-  }
+expressApp.listen(EXPRESS_PORT, () => {
+  console.log(`Smarthome Node Server running on http://localhost:${EXPRESS_PORT}`);
 });
