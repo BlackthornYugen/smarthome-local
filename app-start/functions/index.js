@@ -21,13 +21,16 @@ const {smarthome} = require('actions-on-google');
 const {google} = require('googleapis');
 const cors = require('cors');
 const morgan = require('morgan');
+const bodyParser = require('body-parser');
 const express = require('express');
 const fetch = require('node-fetch');
 
 
-const EXPRESS_PORT = 3000;
+const EXPRESS_PORT = 5001;
 const expressApp = express();
-expressApp.use(cors())
+expressApp.use(cors());
+expressApp.use(bodyParser.json());
+expressApp.use(bodyParser.urlencoded({extended: true}));
 expressApp.use(morgan('dev'))
 
 // Initialize Homegraph
