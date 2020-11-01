@@ -1,15 +1,14 @@
-# Smart home local execution codelab
+# Smart home local execution via WebThings
 
-This project contains the source for for the [Smart Home Local Execution codelab](https://codelabs.developers.google.com/codelabs/smarthome-local),
-which demonstrates how to integrate a local execution using a Google Home device
-with an existing smart home cloud project.
+Interact with your WebThings through Google Assistant.
 
-## Support
+This project was forked from [Smart Home Local Execution codelab](https://codelabs.developers.google.com/codelabs/smarthome-local),
+which demonstrates how to integrate a local execution using a Google Home device with an existing smart home cloud project.
 
-- Stack Overflow: https://stackoverflow.com/questions/tagged/google-smart-home
+Continue reading in: 
 
-If you've found an error in this codelab, please file an issue:
-https://github.com/googlecodelabs/smarthome-local/issues
+- [server/README.md](server/README.md)
+- [google-home-client/README.md](google-home-client/README.md)
 
 ## License
 Copyright 2019 Google LLC
